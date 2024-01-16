@@ -1,188 +1,276 @@
-/*************************************************************
-  Download latest Blynk library here:
-    https://github.com/blynkkk/blynk-library/releases/latest
+/**
+ * @file      Arduino_NetworkTest.ino
+ * @author    Lewis He (lewishe@outlook.com)
+ * @license   MIT
+ * @copyright Copyright (c) 2023  Shenzhen Xin Yuan Electronic Technology Co., Ltd
+ * @date      2023-02-01
+ * @note      This example function is the SIM7000/SIM7070 network test to
+ *            determine whether the module can access the network and obtain some access parameters
+ */
 
-  Blynk is a platform with iOS and Android apps to control
-  Arduino, Raspberry Pi and the likes over the Internet.
-  You can easily build graphic interfaces for all your
-  projects by simply dragging and dropping widgets.
+// Set serial for debug console (to the Serial Monitor, default speed 115200)
+#define SerialMon Serial
 
-    Downloads, docs, tutorials: http://www.blynk.cc
-    Sketch generator:           http://examples.blynk.cc
-    Blynk community:            http://community.blynk.cc
-    Follow us:                  http://www.fb.com/blynkapp
-                                http://twitter.com/blynk_app
+// Set serial for AT commands (to the module)
+// Use Hardware Serial on Mega, Leonardo, Micro
+#define SerialAT Serial1
 
-  Blynk library is licensed under MIT license
-  This example code is in public domain.
-
- *************************************************************
-  Attention! Please check out TinyGSM guide:
-    https://tiny.cc/tinygsm-readme
-
-  Change GPRS apm, user, pass, and Blynk auth token to run :)
-  Feel free to apply it to any other example. It's simple!
-
- *************************************************************/
-
-/* Fill-in your Template ID (only if using Blynk.Cloud) */
-#define BLYNK_TEMPLATE_ID ""
-#define BLYNK_DEVICE_NAME ""
-#define BLYNK_AUTH_TOKEN "";
-
-// Select your modem:
 #define TINY_GSM_MODEM_SIM7000
+#define TINY_GSM_RX_BUFFER 1024 // Set RX buffer to 1Kb
+#define SerialAT Serial1
 
-// Default heartbeat interval for GSM is 60
-// If you want override this value, uncomment and set this option:
-//#define BLYNK_HEARTBEAT 30
+// See all AT commands, if wanted
+// #define DUMP_AT_COMMANDS
 
 #include <TinyGsmClient.h>
-#include <BlynkSimpleTinyGSM.h>
+#include <SPI.h>
+#include <SD.h>
+#include <Ticker.h>
 
-#include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_BMP085.h>
-
-Adafruit_BMP085 bmp;
-BlynkTimer timer;
-
-// You should get Auth Token in the Blynk App.
-// Go to the Project Settings (nut icon).
-char auth[] = BLYNK_AUTH_TOKEN;
-
-// Your GPRS credentials
-// Leave empty, if missing user or pass
-char apn[]  = "YourAPN";
-char user[] = "";
-char pass[] = "";
-
-#define SerialAT Serial1
-#define UART_BAUD   115200
-#define PIN_DTR     25
-#define PIN_TX      27
-#define PIN_RX      26
-#define PWR_PIN     4
-#define LED_PIN     12
-#define BAT_ADC     35
-bool reply = false;
-
+#ifdef DUMP_AT_COMMANDS
+#include <StreamDebugger.h>
+StreamDebugger debugger(SerialAT, SerialMon);
+TinyGsm modem(debugger);
+#else
 TinyGsm modem(SerialAT);
+#endif
 
-BLYNK_WRITE(V3)
+#define UART_BAUD 9600
+#define PIN_DTR 25
+#define PIN_TX 27
+#define PIN_RX 26
+#define PWR_PIN 4
+
+#define SD_MISO 2
+#define SD_MOSI 15
+#define SD_SCLK 14
+#define SD_CS 13
+#define LED_PIN 12
+
+void enableGPS(void)
 {
-    if (param.asInt() == 1) {
-
-        digitalWrite(LED_PIN, LOW);
-        Blynk.logEvent("led_off");//Sending Events
-    } else {
-        digitalWrite(LED_PIN, HIGH);
-        Blynk.logEvent("led_on");//Sending Events
+    // Set Modem GPS Power Control Pin to HIGH ,turn on GPS power
+    // Only in version 20200415 is there a function to control GPS power
+    modem.sendAT("+CGPIO=0,48,1,1");
+    if (modem.waitResponse(10000L) != 1)
+    {
+        DBG("Set GPS Power HIGH Failed");
     }
+    modem.enableGPS();
 }
 
-//Syncing the output state with the app at startup
-BLYNK_CONNECTED()
+void disableGPS(void)
 {
-    Blynk.syncVirtual(V3);  // will cause BLYNK_WRITE(V3) to be executed
-}
-
-
-float readBattery(uint8_t pin)
-{
-    int vref = 1100;
-    uint16_t volt = analogRead(pin);
-    float battery_voltage = ((float)volt / 4095.0) * 2.0 * 3.3 * (vref);
-    return battery_voltage;
-}
-
-// This function sends Arduino's up time every second to Virtual Pin (5).
-// In the app, Widget's reading frequency should be set to PUSH. This means
-// that you define how often to send data to Blynk App.
-void sendSensor()
-{
-    float h = bmp.readPressure() / 1000;
-    float t = bmp.readTemperature(); // or dht.readTemperature(true) for Fahrenheit
-    float mv = readBattery(BAT_ADC);
-    Serial.print("mv :");  Serial.println(mv);
-    Serial.print("Pressure :");  Serial.println(h);
-    Serial.print("Temperature :");  Serial.println(t);
-
-    if (isnan(h) || isnan(t) || isnan(mv)) {
-        Serial.println("Failed to read from DHT sensor!");
-        return;
+    // Set Modem GPS Power Control Pin to LOW ,turn off GPS power
+    // Only in version 20200415 is there a function to control GPS power
+    modem.sendAT("+CGPIO=0,48,1,0");
+    if (modem.waitResponse(10000L) != 1)
+    {
+        DBG("Set GPS Power LOW Failed");
     }
-    // You can send any value at any time.
-    // Please don't send more that 10 values per second.
-
-    Blynk.virtualWrite(V0, t);
-    Blynk.virtualWrite(V1, h);
-    Blynk.virtualWrite(V2, ((mv / 4200) * 100));
+    modem.disableGPS();
 }
 
+void modemPowerOn()
+{
+    pinMode(PWR_PIN, OUTPUT);
+    digitalWrite(PWR_PIN, LOW);
+    delay(1000); // Datasheet Ton mintues = 1S
+    digitalWrite(PWR_PIN, HIGH);
+}
 
-
+void modemPowerOff()
+{
+    pinMode(PWR_PIN, OUTPUT);
+    digitalWrite(PWR_PIN, LOW);
+    delay(1500); // Datasheet Ton mintues = 1.2S
+    digitalWrite(PWR_PIN, HIGH);
+}
 
 void setup()
 {
-    Serial.begin(115200); // Set console baud rate
-    delay(100);
+    // Set console baud rate
+    SerialMon.begin(115200);
 
     // Set LED OFF
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, HIGH);
 
-    pinMode(PWR_PIN, OUTPUT);
-    digitalWrite(PWR_PIN, HIGH);
-    // Starting the machine requires at least 1 second of low level, and with a level conversion, the levels are opposite
-    delay(1000);
-    digitalWrite(PWR_PIN, LOW);
+    modemPowerOn();
 
-    SPI.begin(SD_SCLK, SD_MISO, SD_MOSI, SD_CS);
-    if (!SD.begin(SD_CS)) {
-        Serial.println("SDCard MOUNT FAIL");
-    } else {
+    SPI.begin(SD_SCLK, SD_MISO, SD_MOSI);
+    if (!SD.begin(SD_CS))
+    {
+        Serial.println("> It looks like you haven't inserted the SD card..");
+    }
+    else
+    {
         uint32_t cardSize = SD.cardSize() / (1024 * 1024);
-        String str = "SDCard Size: " + String(cardSize) + "MB";
+        String str = "> SDCard Size: " + String(cardSize) + "MB";
         Serial.println(str);
     }
 
-    Serial.println("\nWait...");
-
-    delay(1000);
-
     SerialAT.begin(UART_BAUD, SERIAL_8N1, PIN_RX, PIN_TX);
 
+    Serial.println("> Check whether Modem is online");
+    // test modem is online ?
+    uint32_t timeout = millis();
+    while (!modem.testAT())
+    {
+        Serial.print(".");
+        if (millis() - timeout > 60000)
+        {
+            Serial.println("> It looks like the modem is not responding, trying to restart");
+            modemPowerOff();
+            delay(5000);
+            modemPowerOn();
+            timeout = millis();
+        }
+    }
+    Serial.println("\nModem is online");
 
-    // Restart takes quite some time
-    // To skip it, call init() instead of restart()
-    Serial.println("Initializing modem...");
-    if (!modem.restart()) {
-        Serial.println("Failed to restart modem, attempting to continue without restarting");
+    // test sim card is online ?
+    timeout = millis();
+    Serial.print("> Get SIM card status");
+    while (modem.getSimStatus() != SIM_READY)
+    {
+        Serial.print(".");
+        if (millis() - timeout > 60000)
+        {
+            Serial.println("It seems that your SIM card has not been detected. Has it been inserted?");
+            Serial.println("If you have inserted the SIM card, please remove the power supply again and try again!");
+            return;
+        }
+    }
+    Serial.println();
+    Serial.println("> SIM card exists");
+
+    Serial.println("> /**********************************************************/");
+    Serial.println("> Please make sure that the location has 2G/NB-IOT signal");
+    Serial.println("> SIM7000/SIM707G does not support 4G network. Please ensure that the USIM card you use supports 2G/NB access");
+    Serial.println("> /**********************************************************/");
+
+    String res = modem.getIMEI();
+    Serial.print("IMEI:");
+    Serial.println(res);
+    Serial.println();
+
+    /*
+     * Tips:
+     * When you are not sure which method of network access is supported by the network you use,
+     * please use the automatic mode. If you are sure, please change the parameters to speed up the network access
+     * * * * */
+
+    // Set mobile operation band
+    modem.sendAT("+CBAND=ALL_MODE");
+    modem.waitResponse();
+
+    // Args:
+    // 1 CAT-M
+    // 2 NB-IoT
+    // 3 CAT-M and NB-IoT
+    // Set network preferre to au
+
+    // Args:
+    // 2 Automatic
+    // 13 GSM only
+    // 38 LTE only
+    // 51 GSM and LTE only
+    // Set network mode to auto
+    modem.setNetworkMode(2);
+
+    // Check network signal and registration information
+    Serial.println("> SIM7000/SIM7070 uses automatic mode to access the network. The access speed may be slow. Please wait patiently");
+    RegStatus status;
+    timeout = millis();
+    do
+    {
+        int16_t sq = modem.getSignalQuality();
+
+        status = modem.getRegistrationStatus();
+
+        if (status == REG_DENIED)
+        {
+            Serial.println("> The SIM card you use has been rejected by the network operator. Please check that the card you use is not bound to a device!");
+            return;
+        }
+        else
+        {
+            Serial.print("Signal:");
+            Serial.println(sq);
+        }
+
+        if (millis() - timeout > 360000)
+        {
+            if (sq == 99)
+            {
+                Serial.println("> It seems that there is no signal. Please check whether the"
+                               "LTE antenna is connected. Please make sure that the location has 2G/NB-IOT signal\n"
+                               "SIM7000G does not support 4G network. Please ensure that the USIM card you use supports 2G/NB access");
+                return;
+            }
+            timeout = millis();
+        }
+
+        delay(800);
+    } while (status != REG_OK_HOME && status != REG_OK_ROAMING);
+
+    Serial.println("Obtain the APN issued by the network");
+    modem.sendAT("+CGNAPN");
+    if (modem.waitResponse(3000, res) == 1)
+    {
+        res = res.substring(res.indexOf(",") + 1);
+        res.replace("\"", "");
+        res.replace("\r", "");
+        res.replace("\n", "");
+        res.replace("OK", "");
+        Serial.print("The APN issued by the network is:");
+        Serial.println(res);
     }
 
-    String name = modem.getModemName();
-    delay(500);
-    Serial.println("Modem Name: " + name);
+    modem.sendAT("+CNACT=1");
+    modem.waitResponse();
 
-
-    // Launch BMP085
-    if (!bmp.begin()) {
-        Serial.println("Could not find a valid BMP085 sensor, check wiring!");
-        while (1) {}
+    // res = modem.getLocalIP();
+    modem.sendAT("+CNACT?");
+    if (modem.waitResponse("+CNACT: ") == 1)
+    {
+        modem.stream.read();
+        modem.stream.read();
+        res = modem.stream.readStringUntil('\n');
+        res.replace("\"", "");
+        res.replace("\r", "");
+        res.replace("\n", "");
+        modem.waitResponse();
+        Serial.print("The current network IP address is:");
+        Serial.println(res);
     }
 
+    modem.sendAT("+CPSI?");
+    if (modem.waitResponse("+CPSI: ") == 1)
+    {
+        res = modem.stream.readStringUntil('\n');
+        res.replace("\r", "");
+        res.replace("\n", "");
+        modem.waitResponse();
+        Serial.print("The current network parameter is:");
+        Serial.println(res);
+    }
 
-
-    Blynk.begin(auth, modem, apn, user, pass);
-    // Setup a function to be called every second
-    timer.setInterval(2000L, sendSensor);
+    Serial.println("/**********************************************************/");
+    Serial.println("After the network test is complete, please enter the  ");
+    Serial.println("AT command in the serial terminal.");
+    Serial.println("/**********************************************************/\n\n");
 }
 
 void loop()
 {
-
-    Blynk.run();
-    timer.run();
-
+    while (SerialAT.available())
+    {
+        SerialMon.write(SerialAT.read());
+    }
+    while (SerialMon.available())
+    {
+        SerialAT.write(SerialMon.read());
+    }
 }

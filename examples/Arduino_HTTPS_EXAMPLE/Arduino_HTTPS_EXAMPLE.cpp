@@ -10,6 +10,9 @@
  * TinyGSM Getting Started guide:
  *   https://tiny.cc/tinygsm-readme
  *
+ * SSL/TLS is not yet supported on the Quectel modems
+ * The A6/A7/A20 and M590 are not capable of SSL/TLS
+ *
  * For more HTTP API examples, see ArduinoHttpClient library
  *
  * NOTE: This example may NOT work with the XBee because the
@@ -19,24 +22,11 @@
  **************************************************************/
 
 // Select your modem:
-// #define TINY_GSM_MODEM_SIM800
+#define TINY_GSM_MODEM_SIM7070
 // #define TINY_GSM_MODEM_SIM808
 // #define TINY_GSM_MODEM_SIM868
-// #define TINY_GSM_MODEM_SIM900
-// #define TINY_GSM_MODEM_SIM7000
-// #define TINY_GSM_MODEM_SIM7000SSL
-// #define TINY_GSM_MODEM_SIM7080
-// #define TINY_GSM_MODEM_SIM5360
-#define TINY_GSM_MODEM_SIM7600
 // #define TINY_GSM_MODEM_UBLOX
 // #define TINY_GSM_MODEM_SARAR4
-// #define TINY_GSM_MODEM_M95
-// #define TINY_GSM_MODEM_BG96
-// #define TINY_GSM_MODEM_A6
-// #define TINY_GSM_MODEM_A7
-// #define TINY_GSM_MODEM_M590
-// #define TINY_GSM_MODEM_MC60
-// #define TINY_GSM_MODEM_MC60E
 // #define TINY_GSM_MODEM_ESP8266
 // #define TINY_GSM_MODEM_XBEE
 // #define TINY_GSM_MODEM_SEQUANS_MONARCH
@@ -46,14 +36,11 @@
 
 // Set serial for AT commands (to the module)
 // Use Hardware Serial on Mega, Leonardo, Micro
-#ifndef __AVR_ATmega328P__
 #define SerialAT Serial1
 
 // or Software Serial on Uno, Nano
-#else
-#include <SoftwareSerial.h>
-SoftwareSerial SerialAT(27, 26); // RX, TX
-#endif
+// #include <SoftwareSerial.h>
+// SoftwareSerial SerialAT(2, 3); // RX, TX
 
 // Increase RX buffer to capture the entire response
 // Chips without internal buffering (A6/A7, ESP8266, M590)
@@ -71,22 +58,25 @@ SoftwareSerial SerialAT(27, 26); // RX, TX
 // #define LOGGING  // <- Logging is for the HTTP library
 
 // Range to attempt to autobaud
-// NOTE:  DO NOT AUTOBAUD in production code.  Once you've established
-// communication, set a fixed baud rate using modem.setBaud(#).
 #define GSM_AUTOBAUD_MIN 9600
 #define GSM_AUTOBAUD_MAX 115200
 
-// Add a reception delay, if needed.
-// This may be needed for a fast processor at a slow baud rate.
+// Add a reception delay - may be needed for a fast processor at a slow baud rate
 // #define TINY_GSM_YIELD() { delay(2); }
 
 // Define how you're planning to connect to the internet
-// These defines are only for this example; they are not needed in other code.
 #define TINY_GSM_USE_GPRS true
 #define TINY_GSM_USE_WIFI false
 
 // set GSM PIN, if any
+#define MODEM_UART_BAUD 9600
 #define GSM_PIN ""
+#define MODEM_TX 27
+#define MODEM_RX 26
+#define MODEM_PWRKEY 4
+#define LED_PIN 12
+// flag to force SSL client authentication, if needed
+// #define TINY_GSM_SSL_CLIENT_AUTHENTICATION
 
 // Your GPRS credentials, if any
 const char apn[] = "claro.pe";
@@ -98,9 +88,9 @@ const char wifiSSID[] = "YourSSID";
 const char wifiPass[] = "YourWiFiPass";
 
 // Server details
-const char server[] = "vsh.pp.ua";
-const char resource[] = "/TinyGSM/logo.txt";
-const int port = 80;
+const char server[] = "dev.api.devices.energyatech.com";
+const char resource[] = "/";
+const int port = 443;
 
 #include <TinyGsmClient.h>
 #include <ArduinoHttpClient.h>
@@ -127,7 +117,7 @@ TinyGsm modem(debugger);
 TinyGsm modem(SerialAT);
 #endif
 
-TinyGsmClient client(modem);
+TinyGsmClientSecure client(modem);
 HttpClient http(client, server, port);
 
 void setup()
@@ -137,12 +127,24 @@ void setup()
     delay(10);
 
     // !!!!!!!!!!!
-    // Set your reset, enable, power pins here
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);
+
+    /*
+    MODEM_PWRKEY IO:4 The power-on signal of the modulator must be given to it,
+    otherwise the modulator will not reply when the command is sent
+    */
+    pinMode(MODEM_PWRKEY, OUTPUT);
+    digitalWrite(MODEM_PWRKEY, HIGH);
+    delay(300); // Need delay
+    digitalWrite(MODEM_PWRKEY, LOW);
     // !!!!!!!!!!!
 
     SerialMon.println("Wait...");
 
-    SerialAT.begin(9600);
+    // Set GSM module baud rate
+    SerialAT.begin(MODEM_UART_BAUD, SERIAL_8N1, MODEM_RX, MODEM_TX);
+    // SerialAT.begin(9600);
     delay(6000);
 
     // Restart takes quite some time
@@ -166,6 +168,7 @@ void setup()
 
 void loop()
 {
+
 #if TINY_GSM_USE_WIFI
     // Wifi connection parameters must be set before waiting for the network
     SerialMon.print(F("Setting SSID/password..."));
@@ -215,7 +218,8 @@ void loop()
     }
 #endif
 
-    SerialMon.print(F("Performing HTTP GET request... "));
+    SerialMon.print(F("Performing HTTPS GET request... "));
+    http.connectionKeepAlive(); // Currently, this is needed for HTTPS
     int err = http.get(resource);
     if (err != 0)
     {
