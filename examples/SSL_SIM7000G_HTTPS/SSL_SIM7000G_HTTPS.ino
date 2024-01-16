@@ -45,7 +45,7 @@ const char gprs_user[] = "claro"; // User
 const char gprs_pass[] = "claro"; // Password
 const char simPIN[] = "";         // SIM card PIN code, if any
 
-const char hostname[] = "webservicicesprueba-default-rtdb.firebaseio.com";
+const char hostname[] = "www.vsh.pp.ua";
 int port = 443;
 
 // Layers stack
@@ -195,7 +195,7 @@ void loop()
     {
         Serial.println("");
         Serial.println("Making GET request");
-        http_client.get("/a/check");
+        http_client.get("/");
 
         int status_code = http_client.responseStatusCode();
         String response = http_client.responseBody();

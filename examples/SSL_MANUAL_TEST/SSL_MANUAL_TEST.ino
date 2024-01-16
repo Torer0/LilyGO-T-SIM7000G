@@ -223,16 +223,14 @@ void init_ssl()
     send_at("AT+CCHSTART");
     send_at("AT+CSSLCFG=0");
     send_at("AT+CCHSSLCFG=0,0");
-    SerialAT.println("AT+CCHOPEN=0,\"212.237.59.104\",443,2\r\n");
+    SerialAT.println("AT+CCHOPEN=0,\"dev.api.devices.energyatech.com\",443,2\r\n");
     wRespon(11000);
 }
-
 void init_https()
 {
     send_at("AT+HTTPINIT");
-    send_at("AT+HTTPPARA=\"SSLCFG\",\"0\"");
-    send_at("AT+HTTPPARA=\"URL\",\"https://212.237.59.104\"");
-    send_at("AT+HTTPACTION=2");
+    send_at("AT+HTTPPARA=\"URL\",\"dev.api.devices.energyatech.com\"");
+    send_at("AT+HTTPACTION=0");
     send_at("AT+HTTPHEAD");
     send_at("AT+HTTPTERM");
 }
