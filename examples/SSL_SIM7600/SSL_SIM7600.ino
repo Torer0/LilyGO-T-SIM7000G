@@ -37,7 +37,7 @@ void setup()
     SerialMon.begin(115200);
     SerialAT.begin(115200, SERIAL_8N1, RXD2, TXD2);
     delay(1000);
-    Serial.println("TESTEANDO ANDO");
+    Serial.println("TESTEANDO ANDO SIM7600");
     send_at("AT+CGMR", 500);
     send_at("AT+CNETSTART", 1000);
     send_at("AT+CNSMOD=1", 1000);

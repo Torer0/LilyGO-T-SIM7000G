@@ -1,4 +1,4 @@
-#include "ssl_web.h"
+
 
 #define RXD2 27
 #define TXD2 26
@@ -49,12 +49,13 @@ void setup()
     delay(1000);
     wRespon(15000);
     send_at("AT+CIMI");
-    send_at("AT+CCLK=\"24/01/16,15:28:00-05\"");
+    send_at("AT+CCLK=\"24/01/18,15:28:00-05\"");
     send_at("AT+CCLK?");
     send_at("AT+CTZU=0");
     send_at("AT+CTZU?");
     send_at("AT+CCLK?");
     send_at("AT+CWDHCP?");
+    send_at("AT+CMQTTSTOP");
     send_at("AT+CIPCLOSE");
     send_at("AT+NETCLOSE");
     send_at("AT+CCHSTOP");
@@ -89,13 +90,13 @@ send_at("AT+CCLK?"); */
     // send_at("AT+CCERTLIST");
 
     check_gsm();
-    init_https();
+    init_mqtt();
 }
 
 void loop()
 {
-    /* init_https();
-    delay(1000); */
+    init_https();
+    delay(1000);
 }
 
 void send_at(char *_command)
@@ -202,37 +203,77 @@ void check_gsm()
     send_at("AT+CGPADDR"); */
     // init_ssl();
 }
-
-void init_ssl()
+const int timeout = 120000;
+void enviarComandoAT(String comando)
 {
-    send_at("AT+CSSLCFG=\"sslversion\",0,4");
-    send_at("AT+CSSLCFG=\"authmode\",0,1");
-    send_at("AT+CSSLCFG=\"ignorelocaltime\",0,1");
-    send_at("AT+CSSLCFG=\"negotiatetime\",0,300");
-    send_at("AT+CCERTDOWN=\"apieat.der\",1825");
-    wRespon(5000);
-    SerialAT.write(root_ca);
-    wRespon(10000);
-    send_at("AT+CSSLCFG=\"ciphersuites\",0,0xFFFF");
-    send_at("AT+CSSLCFG=\"cacert\",0,\"apieat.der\"");
-    send_at("AT+CCERTLIST");
-    send_at("AT+CCERTDELE=\"apieat.der\"");
-    //  configurar GPRS netword
-    send_at("AT+CGDCONT=1,\"IP\",\"claro.pe\"");
-    // init ssl
-    send_at("AT+CCHSTART");
-    send_at("AT+CSSLCFG=0");
-    send_at("AT+CCHSSLCFG=0,0");
-    SerialAT.println("AT+CCHOPEN=0,\"dev.api.devices.energyatech.com\",443,2\r\n");
-    wRespon(11000);
+    Serial.println("Enviando comando AT: " + comando);
+
+    // Limpiar el buffer serial
+    while (SerialAT.available() > 0)
+    {
+        SerialAT.read();
+    }
+
+    // Enviar el comando AT
+    SerialAT.println(comando);
+
+    // Esperar la respuesta
+    unsigned long tiempoInicio = millis();
+    while (millis() - tiempoInicio < timeout)
+    {
+        if (SerialAT.available() > 0)
+        {
+            // Si hay datos disponibles en el puerto serial, leer la respuesta
+            String respuesta = SerialAT.readString();
+            Serial.println("Respuesta: " + respuesta);
+            return; // Salir de la función después de recibir la respuesta
+        }
+    }
+
+    // Si no se recibe ninguna respuesta dentro del tiempo máximo
+    Serial.println("Tiempo de espera agotado. No se recibió ninguna respuesta.");
+}
+
+void init_mqtt()
+{
+    send_at("ATI");
+    send_at("AT+CGMR");
+    send_at("AT+CMQTTSTART");
+    send_at("AT+CMQTTACCQ=0, \"mqttx_bee75592\",1");
+    send_at("AT+CMQTTWILLTOPIC=0,10");
+    SerialAT.println("TOPICODEPRUEBA1234");
+    wRespon(1000);
+    send_at("AT+CMQTTWILLMSG=0,6,1");
+    SerialAT.println("HELLO WORLD");
+    wRespon(1000);
+    enviarComandoAT("AT+CMQTTCONNECT=0,\"tcp://broker.emqx.io:8883\",1000,1");
+    send_at("AT+CMQTTTOPIC=0,13");
+    SerialAT.println("txreceive12");
+    wRespon(1000);
+    send_at("AT+CMQTTPAYLOAD=0,60");
+    SerialAT.println("12325523462");
+    wRespon(1000);
+    send_at("AT+CMQTTPUB=0,1,60");
+    send_at("AT+CMQTTSUBTOPIC=0,9,1");
+    SerialAT.println("SUBSCRIBE1");
+    wRespon(1000);
+    send_at("AT+CMQTTSUB=0");
+    send_at("AT+CMQTTSUB=0,9,1");
+    SerialAT.println("SUBSCRIBESERVER");
+    wRespon(1000);
+    send_at("AT+CMQTTSUB=0,9,0");
+    SerialAT.println("SUBSCRIBESERVER");
+    wRespon(1000);
+    send_at("AT+CCMQTTDISC=0,120");
+    send_at("AT+CMQTTREL=0");
+    send_at("AT+CMQTTSTOP");
 }
 void init_https()
 {
     send_at("AT+HTTPINIT");
-    send_at("AT+HTTPPARA=\"URL\",\"https://dev.api.devices.energyatech.com\"");
-    SerialAT.println("AT+HTTPACTION=0");
+    enviarComandoAT("AT+HTTPPARA=\"URL\",\"http://google.com\"");
+    enviarComandoAT("AT+HTTPACTION=0");
     wRespon(120000);
-    send_at("AT+HTTPREAD=0,14");
     send_at("AT+HTTPHEAD");
     send_at("AT+HTTPTERM");
 }
